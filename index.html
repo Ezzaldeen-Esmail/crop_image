@@ -3,148 +3,218 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Professional Student Photo Splitter</title>
+    <title>Professional Portrait Scanner & Splitter</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <!-- OpenCV.js for local image processing -->
     <script async src="https://docs.opencv.org/4.5.4/opencv.js" onload="onOpenCvReady();"></script>
     <style>
+        /* Card Animations */
         .photo-card {
-            transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-            border-width: 2px;
+            transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+            border: 1px solid #e2e8f0;
         }
         .photo-card:hover {
-            transform: translateY(-8px) scale(1.02);
-            border-color: #2563eb;
-            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.15);
+            transform: translateY(-5px);
+            border-color: #3b82f6;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
         }
-        #canvas-container { display: none; }
+
+        /* Loading Spinner */
         .loading-spinner {
-            border: 3px solid #f3f3f3;
-            border-top: 3px solid #2563eb;
+            border: 3px solid #f3f4f6;
+            border-top: 3px solid #3b82f6;
             border-radius: 50%;
-            width: 24px;
-            height: 24px;
-            animation: spin 1s linear infinite;
+            width: 20px;
+            height: 20px;
+            animation: spin 0.8s linear infinite;
         }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         
-        .ai-active {
-            box-shadow: 0 0 20px rgba(99, 102, 241, 0.4);
-            animation: border-glow 2s infinite;
+        /* AI Pulse Effect */
+        .ai-pulse {
+            position: relative;
+            overflow: hidden;
         }
-        @keyframes border-glow {
-            0%, 100% { border-color: #6366f1; }
-            50% { border-color: #818cf8; }
+        .ai-pulse::after {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: linear-gradient(45deg, transparent 40%, rgba(255,255,255,0.2) 50%, transparent 60%);
+            animation: shimmer 2s infinite;
+        }
+        @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+
+        /* Print Styles - Hides UI when printing */
+        @media print {
+            body { background: white; padding: 0; }
+            header, #sidebar-controls, #status-bar, #ai-toast, #settings-dropdown { display: none !important; }
+            #main-content { grid-column: span 4 !important; width: 100% !important; }
+            #grid { 
+                display: grid; 
+                grid-template-columns: repeat(5, 1fr); 
+                gap: 10px; 
+            }
+            .photo-card { border: none; box-shadow: none; break-inside: avoid; }
+            .photo-card img { border: 1px solid #ccc; }
+            .no-print { display: none; }
         }
     </style>
 </head>
-<body class="bg-[#f8fafc] min-h-screen font-sans text-slate-900">
+<body class="bg-slate-50 min-h-screen font-sans text-slate-800">
+
+    <!-- Top Navigation Bar -->
+    <nav class="bg-white border-b border-slate-200 px-6 py-4 sticky top-0 z-40 shadow-sm">
+        <div class="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
+            <div class="flex items-center gap-3">
+                <div class="bg-blue-600 p-2 rounded-lg text-white">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                </div>
+                <div>
+                    <h1 class="text-xl font-bold text-slate-900 leading-tight">Portrait Scanner Pro</h1>
+                    <p class="text-xs text-slate-500 font-medium">Classroom Edition v2.2 (Anti-Duplicate)</p>
+                </div>
+            </div>
+
+            <div class="flex items-center gap-3">
+                <button onclick="window.print()" class="hidden md:flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"></path></svg>
+                    Print Sheet
+                </button>
+                
+                <div class="relative">
+                    <button id="settings-btn" class="flex items-center gap-2 px-4 py-2 text-sm font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-lg transition-colors shadow-md">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                        Settings
+                    </button>
+                    <!-- Settings Dropdown -->
+                    <div id="settings-menu" class="hidden absolute right-0 mt-3 w-80 bg-white rounded-xl shadow-xl border border-slate-100 p-5 z-50">
+                        <h4 class="font-bold text-slate-800 text-sm mb-3">⚙️ Application Settings</h4>
+                        <div class="mb-4">
+                            <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Gemini API Key</label>
+                            <input type="password" id="custom-api-key" placeholder="Paste key (starts with AIza...)" class="w-full p-2.5 text-xs bg-slate-50 border border-slate-200 rounded-lg outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all">
+                            <p class="text-[10px] text-slate-400 mt-1">Required for Deep Search & Studio Polish features.</p>
+                        </div>
+                        <button id="save-settings" class="w-full py-2 bg-blue-600 text-white text-xs font-bold rounded-lg hover:bg-blue-700 transition">Save & Close</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </nav>
 
     <div class="max-w-7xl mx-auto px-4 py-8">
-        <!-- Header -->
-        <header class="text-center mb-12">
-            <div class="inline-flex items-center justify-center p-4 bg-white rounded-3xl shadow-sm mb-6 border border-slate-100">
-                <svg class="w-10 h-10 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
-            </div>
-            <h1 class="text-5xl font-black text-slate-900 tracking-tight mb-3">Professional Portrait Scanner</h1>
-            <p class="text-slate-500 text-lg max-w-2xl mx-auto">
-                No more manual cropping. We detect the number of faces and generate high-quality 4:6 crops for every student.
-            </p>
-        </header>
-
-        <!-- Main Dashboard -->
-        <div class="grid lg:grid-cols-4 gap-10">
+        <div class="grid lg:grid-cols-4 gap-8">
             
-            <!-- Sidebar Controls -->
-            <div class="lg:col-span-1 space-y-8">
-                <div class="bg-white p-8 rounded-3xl shadow-sm border border-slate-200">
-                    <h3 class="font-bold text-slate-900 mb-6 flex items-center gap-2">
-                        <span class="flex items-center justify-center w-6 h-6 rounded-full bg-blue-600 text-white text-[10px] font-black">1</span>
-                        Source Sheet
+            <!-- Left Sidebar Controls -->
+            <div id="sidebar-controls" class="lg:col-span-1 space-y-6">
+                
+                <!-- Upload Card -->
+                <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                    <h3 class="font-bold text-slate-800 mb-4 flex items-center gap-2 text-sm uppercase tracking-wide">
+                        1. Upload Source
                     </h3>
-                    <label class="block w-full text-center p-10 border-2 border-dashed border-slate-200 rounded-2xl cursor-pointer hover:border-blue-500 hover:bg-blue-50/50 transition-all group">
-                        <span class="text-slate-400 group-hover:text-blue-600 text-sm font-bold" id="upload-label">Upload Scanned Page</span>
+                    <label class="block w-full text-center p-8 border-2 border-dashed border-slate-200 rounded-xl cursor-pointer hover:border-blue-500 hover:bg-blue-50 transition-all group relative overflow-hidden">
+                        <div class="relative z-10">
+                            <svg class="w-8 h-8 mx-auto text-slate-300 group-hover:text-blue-500 transition-colors mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a2 2 0 002 2h12a2 2 0 002-2v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                            <span class="text-slate-500 group-hover:text-blue-600 text-sm font-semibold block" id="upload-label">Select A4 Scan</span>
+                            <span class="text-[10px] text-slate-400 mt-1 block" id="cv-status">Initializing CV Engine...</span>
+                        </div>
                         <input type="file" id="upload" accept="image/*" class="hidden" disabled>
-                        <p class="text-[10px] mt-3 text-slate-300 font-mono tracking-tighter" id="cv-status">Waking up CV engine...</p>
                     </label>
+                </div>
 
-                    <div id="processing-ui" class="mt-10 space-y-8 opacity-50 pointer-events-none">
+                <!-- Processing Tools -->
+                <div id="processing-ui" class="opacity-50 pointer-events-none transition-opacity duration-500">
+                    <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 space-y-6">
+                        <h3 class="font-bold text-slate-800 flex items-center gap-2 text-sm uppercase tracking-wide">
+                            2. Refine Results
+                        </h3>
+                        
+                        <!-- Sensitivity Slider -->
                         <div>
-                            <div class="flex justify-between mb-3">
-                                <label class="text-xs font-black text-slate-400 uppercase tracking-widest">Crop Margin</label>
-                                <span id="sens-val" class="text-xs font-bold text-blue-600">Standard</span>
+                            <div class="flex justify-between mb-2">
+                                <label class="text-xs font-bold text-slate-500">Edge Sensitivity</label>
+                                <span id="sens-val" class="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded">Auto</span>
                             </div>
-                            <input type="range" id="sensitivity" min="50" max="250" value="120" class="w-full h-2 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-blue-600">
+                            <input type="range" id="sensitivity" min="50" max="250" value="120" class="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600">
                         </div>
 
-                        <div class="space-y-4 pt-6 border-t border-slate-100">
-                            <button id="ai-deep-search" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-black py-4 rounded-2xl transition shadow-xl shadow-indigo-100 flex items-center justify-center gap-3 text-sm">
-                                <span>✨ Deep Face Detection</span>
+                        <!-- Action Buttons -->
+                        <div class="space-y-3 pt-2">
+                            <button id="ai-deep-search" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl transition shadow-lg shadow-indigo-100 flex items-center justify-center gap-2 text-sm group">
+                                <svg class="w-4 h-4 text-indigo-200 group-hover:text-white transition-colors" fill="currentColor" viewBox="0 0 24 24"><path d="M21.71 20.29L17 15.61A9.928 9.928 0 0 0 19 10c0-5.52-4.48-10-10-10S-1 4.48-1 10s4.48 10 10 10c2.38 0 4.63-.84 6.39-2.25l4.71 4.71a1 1 0 0 0 1.41 0 1 1 0 0 0 0-1.42zM10 18a8 8 0 1 1 8-8 8.01 8.01 0 0 1-8 8z"/></svg>
+                                <span>AI Deep Search</span>
                             </button>
-                            <button id="download-zip" class="w-full bg-slate-900 hover:bg-slate-800 text-white font-black py-4 rounded-2xl transition flex items-center justify-center gap-2 text-sm">
-                                📥 Export Full Class (.zip)
+                            <button id="download-zip" class="w-full bg-slate-800 hover:bg-slate-900 text-white font-bold py-3 rounded-xl transition flex items-center justify-center gap-2 text-sm">
+                                <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a2 2 0 002 2h12a2 2 0 002-2v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                                Download All (.zip)
                             </button>
                         </div>
                     </div>
                 </div>
 
-                <!-- AI Sidebar Component -->
-                <div id="ai-sidebar" class="bg-indigo-50 border border-indigo-100 p-8 rounded-3xl shadow-sm opacity-50 pointer-events-none transition-opacity">
-                    <h3 class="font-bold text-indigo-900 mb-4 flex items-center gap-2">
-                        <svg class="w-5 h-5 text-indigo-600" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2L14.5 9H22L16 14L18.5 21L12 17L5.5 21L8 14L2 9H9.5L12 2Z"/></svg>
-                        Teacher's Assistant
+                <!-- AI Insights Panel -->
+                <div id="ai-sidebar" class="bg-gradient-to-br from-indigo-50 to-blue-50 border border-indigo-100 p-6 rounded-2xl opacity-50 pointer-events-none transition-opacity">
+                    <h3 class="font-bold text-indigo-900 mb-3 flex items-center gap-2 text-xs uppercase tracking-wide">
+                        <svg class="w-4 h-4 text-indigo-500" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2L14.5 9H22L16 14L18.5 21L12 17L5.5 21L8 14L2 9H9.5L12 2Z"/></svg>
+                        Assistant Notes
                     </h3>
-                    <div id="ai-sheet-result" class="text-xs text-indigo-800/80 font-medium leading-relaxed italic">
-                        Upload your scan. I'll count the students and check for photo clarity automatically.
+                    <div id="ai-sheet-result" class="text-xs text-slate-600 leading-relaxed min-h-[60px]">
+                        Waiting for upload to analyze class count...
                     </div>
                 </div>
             </div>
 
-            <!-- Content Area -->
-            <div class="lg:col-span-3">
-                <div id="status-bar" class="hidden mb-8 flex items-center justify-between bg-white border border-slate-200 px-8 py-5 rounded-3xl shadow-sm">
-                    <div class="flex items-center gap-5">
+            <!-- Main Content Area -->
+            <div id="main-content" class="lg:col-span-3">
+                <!-- Status Bar -->
+                <div id="status-bar" class="hidden mb-6 flex items-center justify-between bg-white border border-slate-200 px-6 py-4 rounded-xl shadow-sm">
+                    <div class="flex items-center gap-4">
                         <div class="loading-spinner hidden" id="main-spinner"></div>
-                        <span id="status-text" class="text-sm font-bold text-slate-800">Ready to split.</span>
+                        <span id="status-text" class="text-sm font-semibold text-slate-700">Ready.</span>
                     </div>
-                    <div class="flex gap-2">
-                        <span id="counter-badge" class="bg-blue-600 text-white text-xs font-black px-5 py-2 rounded-full shadow-lg shadow-blue-100">0 Portraits</span>
-                    </div>
+                    <span id="counter-badge" class="bg-blue-100 text-blue-700 text-xs font-bold px-3 py-1.5 rounded-full">0 Detected</span>
                 </div>
 
-                <div id="grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-8">
-                    <!-- Dynamic cards -->
+                <!-- Photo Grid -->
+                <div id="grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-6">
+                    <!-- Photos injected here -->
                 </div>
 
                 <!-- Empty State -->
-                <div id="empty-state" class="flex flex-col items-center justify-center py-40 bg-white rounded-[40px] border-2 border-dashed border-slate-100 text-slate-300">
-                    <div class="p-6 bg-slate-50 rounded-full mb-6">
-                        <svg class="w-16 h-16 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                <div id="empty-state" class="flex flex-col items-center justify-center py-32 bg-white rounded-3xl border-2 border-dashed border-slate-200 text-slate-400">
+                    <div class="p-5 bg-slate-50 rounded-full mb-4">
+                        <svg class="w-12 h-12 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
                     </div>
-                    <p class="font-black text-slate-400 text-xl">No Class Sheet Loaded</p>
-                    <p class="text-sm mt-2">Professional crops will appear here once you upload.</p>
+                    <p class="font-bold text-slate-500">No Sheet Loaded</p>
+                    <p class="text-sm mt-1">Upload an A4 scan to begin cropping.</p>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- Hidden processing -->
-    <div id="canvas-container">
+    <!-- Hidden Processing Canvas -->
+    <div id="canvas-container" class="hidden">
         <canvas id="proc-canvas"></canvas>
     </div>
 
-    <!-- AI Toast Message -->
-    <div id="ai-toast" class="fixed bottom-10 left-1/2 -translate-x-1/2 translate-y-24 opacity-0 bg-slate-900 text-white px-10 py-5 rounded-full shadow-2xl transition-all duration-700 flex items-center gap-5 z-50">
-        <div class="loading-spinner border-white/10 border-t-white"></div>
-        <span id="ai-toast-text" class="text-sm font-black tracking-wide">AI Professional Cropping...</span>
+    <!-- Toast Notification -->
+    <div id="ai-toast" class="fixed bottom-8 left-1/2 -translate-x-1/2 translate-y-24 opacity-0 bg-slate-900 text-white px-6 py-3 rounded-full shadow-xl transition-all duration-500 flex items-center gap-4 z-50">
+        <div class="loading-spinner border-white/20 border-t-white w-4 h-4"></div>
+        <span id="ai-toast-text" class="text-xs font-bold tracking-wide">Processing...</span>
     </div>
 
     <script>
-        const apiKey = ""; 
+        // --- CONFIGURATION ---
+        let apiKey = "AIzaSyAF8eWgBZ_Q8LkVPgP2c06FcFnkPOgXtmQ"; // Will be populated from UI or environment
         let cvReady = false;
         
-        // UI Elements
+        // --- DOM ELEMENTS ---
+        const settingsBtn = document.getElementById('settings-btn');
+        const settingsMenu = document.getElementById('settings-menu');
+        const saveSettingsBtn = document.getElementById('save-settings');
+        const customApiKeyInput = document.getElementById('custom-api-key');
+        
         const upload = document.getElementById('upload');
         const cvStatus = document.getElementById('cv-status');
         const grid = document.getElementById('grid');
@@ -167,41 +237,74 @@
         let originalBase64 = null;
         let croppedImages = [];
 
+        // --- INITIALIZATION ---
         function onOpenCvReady() {
             cvReady = true;
-            cvStatus.innerText = "CV Core Ready ✅";
-            cvStatus.classList.replace('text-slate-300', 'text-green-600');
+            cvStatus.innerText = "CV Engine Ready";
+            cvStatus.classList.replace('text-slate-400', 'text-green-600');
             upload.disabled = false;
-        }
-
-        async function callGemini(payload, endpoint = "generateContent", model = "gemini-2.5-flash-preview-09-2025") {
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:${endpoint}?key=${apiKey}`;
-            for (let i = 0; i < 5; i++) {
-                try {
-                    const response = await fetch(url, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(payload)
-                    });
-                    if (!response.ok) throw new Error('API Error');
-                    return await response.json();
-                } catch (e) {
-                    if (i === 4) throw e;
-                    await new Promise(r => setTimeout(r, Math.pow(2, i) * 1000));
-                }
+            
+            // Check for stored key
+            const storedKey = localStorage.getItem('gemini_api_key');
+            if (storedKey) {
+                apiKey = storedKey;
+                customApiKeyInput.value = storedKey;
             }
         }
 
-        function showToast(text, loading = true) {
-            aiToastText.innerText = text;
-            aiToast.classList.remove('translate-y-24', 'opacity-0');
-            aiToast.querySelector('.loading-spinner').style.display = loading ? 'block' : 'none';
+        // --- HELPER: FILTER DUPLICATES ---
+        // Filters bounding boxes that overlap significantly, keeping the largest one.
+        function filterDuplicates(rects) {
+            // Sort by Area Descending (Largest to Smallest)
+            // We prioritize the larger box (e.g. full card) over a smaller overlapping box (e.g. just the face)
+            rects.sort((a, b) => (b.width * b.height) - (a.width * a.height));
+
+            const kept = [];
+            
+            for (const r of rects) {
+                let isDuplicate = false;
+                for (const k of kept) {
+                    // Calculate Intersection
+                    const x_overlap = Math.max(0, Math.min(r.x + r.width, k.x + k.width) - Math.max(r.x, k.x));
+                    const y_overlap = Math.max(0, Math.min(r.y + r.height, k.y + k.height) - Math.max(r.y, k.y));
+                    const intersectionArea = x_overlap * y_overlap;
+                    const rArea = r.width * r.height;
+
+                    // If the current (smaller) rect overlaps more than 30% with an existing (larger) rect, drop it.
+                    if (intersectionArea > rArea * 0.3) {
+                        isDuplicate = true;
+                        break;
+                    }
+                }
+                if (!isDuplicate) kept.push(r);
+            }
+            return kept;
         }
 
-        function hideToast() {
-            aiToast.classList.add('translate-y-24', 'opacity-0');
-        }
+        // --- SETTINGS LOGIC ---
+        settingsBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            settingsMenu.classList.toggle('hidden');
+        });
 
+        saveSettingsBtn.addEventListener('click', () => {
+            const key = customApiKeyInput.value.trim();
+            if (key) {
+                apiKey = key;
+                localStorage.setItem('gemini_api_key', key);
+                showToast("API Key Saved!", false);
+            }
+            settingsMenu.classList.add('hidden');
+            setTimeout(hideToast, 2000);
+        });
+
+        document.addEventListener('click', (e) => {
+            if (!settingsMenu.contains(e.target) && !settingsBtn.contains(e.target)) {
+                settingsMenu.classList.add('hidden');
+            }
+        });
+
+        // --- CORE UPLOAD LOGIC ---
         upload.addEventListener('change', (e) => {
             const file = e.target.files[0];
             if (!file) return;
@@ -218,7 +321,7 @@
                 originalImg = new Image();
                 originalImg.src = event.target.result;
                 originalImg.onload = () => {
-                    detectAndCrop();
+                    detectAndCropLocal();
                     processingUI.classList.remove('opacity-50', 'pointer-events-none');
                     aiSidebar.classList.remove('opacity-50', 'pointer-events-none');
                     mainSpinner.classList.add('hidden');
@@ -230,18 +333,18 @@
 
         sensitivity.addEventListener('input', () => {
             const val = parseInt(sensitivity.value);
-            sensVal.innerText = val < 100 ? "Loose" : val > 150 ? "Strict" : "Standard";
+            sensVal.innerText = val < 80 ? "Low" : val > 160 ? "High" : "Auto";
         });
 
         sensitivity.addEventListener('change', () => {
-            if (originalImg) detectAndCrop();
+            if (originalImg) detectAndCropLocal();
         });
 
-        // Local Smart CV detection - ignores fragments
-        function detectAndCrop() {
+        // --- LOCAL OPENCV DETECTION ---
+        function detectAndCropLocal() {
             grid.innerHTML = '';
             croppedImages = [];
-            statusText.innerText = "Scanning page for full portraits...";
+            statusText.innerText = "Scanning geometry...";
             
             setTimeout(() => {
                 const src = cv.imread(originalImg);
@@ -252,19 +355,22 @@
                 const contours = new cv.MatVector();
                 const hierarchy = new cv.Mat();
 
+                // 1. Preprocessing
                 cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-                cv.GaussianBlur(gray, blurred, new cv.Size(7, 7), 0);
+                cv.GaussianBlur(gray, blurred, new cv.Size(5, 5), 0);
                 
+                // 2. Edge Detection
                 const sensValue = parseInt(sensitivity.value);
-                cv.Canny(blurred, edges, sensValue / 3, sensValue);
+                cv.Canny(blurred, edges, sensValue / 2.5, sensValue);
 
-                let M = cv.Mat.ones(7, 7, cv.CV_8U);
+                // 3. Dilation (Connect broken lines)
+                let M = cv.Mat.ones(5, 5, cv.CV_8U);
                 cv.dilate(edges, dilated, M, new cv.Point(-1, -1), 1, cv.BORDER_CONSTANT, cv.morphologyDefaultBorderValue());
 
+                // 4. Contour Finding
                 cv.findContours(dilated, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
 
                 let detections = [];
-                // STRICT FILTERING: Only rectangles of a certain size (prevents cropping "parts")
                 const minArea = (src.rows * src.cols) * 0.003; 
                 const maxArea = (src.rows * src.cols) * 0.15;
 
@@ -275,52 +381,96 @@
                     if (area > minArea && area < maxArea) {
                         let rect = cv.boundingRect(cnt);
                         const aspect = rect.width / rect.height;
-                        
-                        // ID photo aspect ratio check (roughly vertical rectangle)
-                        if (aspect > 0.45 && aspect < 1.1) {
+                        // ID Photo is vertical rectangle (roughly 0.6 to 0.9 aspect)
+                        // We allow loose bounds to catch tilted ones
+                        if (aspect > 0.4 && aspect < 1.1) {
                             detections.push(rect);
                         }
                     }
                 }
 
-                // Sort properly to match reading order
+                // 5. Filter Duplicates (New Step)
+                detections = filterDuplicates(detections);
+
+                // 6. Sorting (Row by Row)
                 detections.sort((a, b) => {
-                    const rowTol = src.rows * 0.05;
+                    const rowTol = src.rows * 0.03; // 3% height tolerance for rows
                     if (Math.abs(a.y - b.y) > rowTol) return a.y - b.y;
                     return a.x - b.x;
                 });
 
+                // 7. Extraction & Cropping
                 detections.forEach((rect, idx) => {
-                    // Force a professional 4:6 crop centered on the found region
+                    // Smart Aspect Ratio Enforcer (4:6)
                     const targetAspect = 0.67;
                     let w = rect.width;
                     let h = Math.round(w / targetAspect);
                     
-                    // Adjust y to center vertically if possible
-                    let yShift = Math.round((h - rect.height) / 2);
+                    // "Head-Bias" Centering:
+                    let yShift = Math.round((h - rect.height) * 0.4); 
                     let nx = rect.x;
                     let ny = Math.max(0, rect.y - yShift);
                     
-                    // Boundary check
                     if (ny + h > src.rows) h = src.rows - ny;
                     if (nx + w > src.cols) w = src.cols - nx;
 
                     let roi = src.roi(new cv.Rect(nx, ny, w, h));
                     const canvas = document.createElement('canvas');
                     cv.imshow(canvas, roi);
-                    const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+                    const dataUrl = canvas.toDataURL('image/jpeg', 0.92); // High quality jpg
                     
                     croppedImages.push(dataUrl);
                     createPhotoCard(dataUrl, idx + 1);
                     roi.delete();
                 });
 
-                counterBadge.innerText = `${detections.length} Portraits Found`;
-                statusText.innerText = detections.length > 0 ? `Localized ${detections.length} student cards.` : "No clear student cards found. Adjust margin slider.";
+                counterBadge.innerText = `${detections.length} Photos`;
+                statusText.innerText = detections.length > 0 ? "Photos localized." : "No photos found. Try Deep Search.";
                 
+                // Cleanup
                 src.delete(); gray.delete(); blurred.delete(); 
                 edges.delete(); dilated.delete(); contours.delete(); hierarchy.delete(); M.delete();
             }, 50);
+        }
+
+        // --- AI API FUNCTIONS ---
+        async function callGemini(payload, endpoint = "generateContent", model = "gemini-2.5-flash-preview-09-2025") {
+            if (!apiKey) {
+                showToast("Error: API Key missing. Check Settings.", false);
+                setTimeout(hideToast, 3000);
+                throw new Error("No API Key");
+            }
+            
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:${endpoint}?key=${apiKey}`;
+            
+            // Retry logic with exponential backoff for 429
+            for (let i = 0; i < 5; i++) {
+                try {
+                    const response = await fetch(url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    // Handle Rate Limiting (429) specifically
+                    if (response.status === 429) {
+                        const waitTime = Math.pow(2, i);
+                        showToast(`Server busy. Retrying in ${waitTime}s...`, true);
+                        throw new Error(`API Error: 429`);
+                    }
+                    
+                    if (!response.ok) throw new Error(`API Error: ${response.status}`);
+                    return await response.json();
+
+                } catch (e) {
+                    if (i === 4) { // Last attempt failed
+                         showToast("System overloaded (429). Please wait 1 min.", false);
+                         throw e;
+                    }
+                    // Backoff: 1s, 2s, 4s, 8s
+                    await new Promise(r => setTimeout(r, Math.pow(2, i) * 1000));
+                }
+            }
         }
 
         async function analyzeClassSheet() {
@@ -328,53 +478,28 @@
                 const result = await callGemini({
                     contents: [{
                         parts: [
-                            { text: "Briefly count the number of faces you see on this scanned sheet. Provide a one-sentence summary of the image quality for a teacher." },
+                            { text: "Count the student faces. Provide a 1 sentence status report for the teacher." },
                             { inlineData: { mimeType: "image/jpeg", data: originalBase64 } }
                         ]
                     }]
                 });
-                aiSheetResult.innerText = result.candidates?.[0]?.content?.parts?.[0]?.text || "Analyze ready.";
+                if (result) aiSheetResult.innerText = result.candidates?.[0]?.content?.parts?.[0]?.text;
             } catch (e) {
-                aiSheetResult.innerText = "AI assistant ready.";
+                aiSheetResult.innerText = "Connect API Key for insights.";
             }
         }
 
-        function createPhotoCard(src, index) {
-            const div = document.createElement('div');
-            div.className = "photo-card bg-white p-5 rounded-[2rem] border border-slate-100 flex flex-col group relative overflow-hidden";
-            div.innerHTML = `
-                <div class="relative aspect-[4/6] overflow-hidden rounded-2xl bg-slate-50 mb-5 shadow-inner border border-slate-50">
-                    <img id="img-${index}" src="${src}" class="w-full h-full object-cover transition-all duration-1000" alt="Student ${index}">
-                    <div id="loader-${index}" class="absolute inset-0 bg-white/60 hidden items-center justify-center backdrop-blur-sm z-10">
-                        <div class="loading-spinner"></div>
-                    </div>
-                </div>
-                <div class="flex items-center justify-between">
-                    <span class="text-[10px] font-black text-slate-300 tracking-[0.2em] uppercase">Student #${index}</span>
-                    <div class="flex gap-2">
-                        <button onclick="polishPhoto(${index})" title="✨ Studio Polish" class="p-2 text-indigo-500 hover:bg-indigo-600 hover:text-white rounded-xl transition-all">
-                            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2L14.5 9H22L16 14L18.5 21L12 17L5.5 21L8 14L2 9H9.5L12 2Z"/></svg>
-                        </button>
-                        <a href="${src}" download="Student_${index}.jpg" class="p-2 text-slate-300 hover:text-slate-900 rounded-xl transition-all">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a2 2 0 002 2h12a2 2 0 002-2v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
-                        </a>
-                    </div>
-                </div>
-            `;
-            grid.appendChild(div);
-        }
-
-        // ✨ Feature: Gemini Professional Deep Search (Explicitly crops images, not parts)
+        // --- AI DEEP SEARCH ---
         aiDeepSearchBtn.addEventListener('click', async () => {
             if (!originalBase64) return;
             
-            showToast("Deep Search: Detecting full portrait card boundaries...", true);
+            showToast("Deep Search: Detecting IDs...", true);
             aiDeepSearchBtn.disabled = true;
-            aiDeepSearchBtn.classList.add('ai-active');
+            aiDeepSearchBtn.classList.add('ai-pulse');
 
             try {
-                // We ask Gemini to specifically find the cards, not the faces alone
-                const prompt = "Detect every individual student photo card on this page. For each card, return its precise bounding box. Ensure you crop the FULL card, including the student's head and shoulders. Output JSON: [ { \"id\": 1, \"box_2d\": [ymin, xmin, ymax, xmax] } ]. Do not include background text or empty spaces. Return exactly the same number of boxes as there are students.";
+                // Strict prompt to find cards, not just faces
+                const prompt = "Detect every individual student photo card on this page. Output bounding box for the WHOLE card (head+shoulders). JSON only: [ { \"box_2d\": [ymin, xmin, ymax, xmax] } ]. Ignore noise/text.";
                 
                 const result = await callGemini({
                     contents: [{
@@ -387,65 +512,75 @@
                 });
                 
                 const data = JSON.parse(result.candidates[0].content.parts[0].text);
+                
                 if (data && Array.isArray(data)) {
                     grid.innerHTML = '';
                     croppedImages = [];
                     const canvas = document.createElement('canvas');
                     const ctx = canvas.getContext('2d');
                     
-                    data.forEach((item, idx) => {
-                        const box = item.box_2d; 
-                        
+                    let detections = [];
+
+                    // 1. Convert API data to standard rect objects
+                    data.forEach((item) => {
+                        const box = item.box_2d; // ymin, xmin, ymax, xmax (0-1000 scale)
                         let y = (box[0] / 1000) * originalImg.height;
                         let x = (box[1] / 1000) * originalImg.width;
                         let h = ((box[2] - box[0]) / 1000) * originalImg.height;
                         let w = ((box[3] - box[1]) / 1000) * originalImg.width;
+                        
+                        detections.push({x, y, width: w, height: h});
+                    });
 
-                        // Force 4:6 aspect ratio
+                    // 2. Filter Duplicates (Fix for AI overlapping responses)
+                    detections = filterDuplicates(detections);
+                    
+                    // 3. Render
+                    detections.forEach((rect, idx) => {
+                        let {x, y, width: w, height: h} = rect;
+
+                        // Normalize Aspect (4:6)
                         const targetAspect = 0.67;
-                        if (w / h > targetAspect) {
-                            // Too wide, adjust width
-                            w = h * targetAspect;
-                        } else {
-                            // Too tall, adjust height
-                            h = w / targetAspect;
-                        }
+                        if (w / h > targetAspect) { w = h * targetAspect; } 
+                        else { h = w / targetAspect; }
 
                         canvas.width = w;
                         canvas.height = h;
                         ctx.drawImage(originalImg, x, y, w, h, 0, 0, w, h);
                         
-                        const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+                        const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
                         croppedImages.push(dataUrl);
                         createPhotoCard(dataUrl, idx + 1);
                     });
                     
-                    counterBadge.innerText = `${data.length} Portraits Found (AI)`;
-                    showToast(`AI successfully detected ${data.length} students!`, false);
+                    counterBadge.innerText = `${detections.length} AI Found`;
+                    showToast(`Success: ${detections.length} photos found!`, false);
                 }
             } catch (err) {
-                showToast("Deep Search Error. Try local scan.", false);
+                console.error(err);
+                // Toast handled in callGemini or here if logic fails
+                if (!err.message.includes('429')) showToast("Deep Search failed. Check API Key.", false);
             } finally {
                 aiDeepSearchBtn.disabled = false;
-                aiDeepSearchBtn.classList.remove('ai-active');
-                setTimeout(hideToast, 3000);
+                aiDeepSearchBtn.classList.remove('ai-pulse');
+                setTimeout(hideToast, 2500);
             }
         });
 
-        // Studio Polish
+        // --- STUDIO POLISH ---
         window.polishPhoto = async (index) => {
             const imgElement = document.getElementById(`img-${index}`);
             const loader = document.getElementById(`loader-${index}`);
             const base64Crop = imgElement.src.split(',')[1];
             
             loader.classList.replace('hidden', 'flex');
-            showToast(`Polishing Student #${index}...`);
+            showToast(`Enhancing Student #${index}...`);
 
             try {
                 const result = await callGemini({
                     contents: [{
                         parts: [
-                            { text: "Professional school portrait enhancement: 1. Replace the background with a soft studio-blue gradient. 2. Sharpen the face. 3. Ensure a 4:6 vertical orientation. Maintain identical student appearance." },
+                            { text: "Professional studio edit: 1. Clean background (soft blue gradient). 2. Sharpen face/eyes. 3. Fix lighting. Keep student ID identical. Portrait ratio." },
                             { inlineData: { mimeType: "image/jpeg", data: base64Crop } }
                         ]
                     }],
@@ -455,39 +590,84 @@
                 const polishedBase64 = result.candidates?.[0]?.content?.parts?.find(p => p.inlineData)?.inlineData?.data;
                 
                 if (polishedBase64) {
-                    imgElement.src = `data:image/png;base64,${polishedBase64}`;
-                    croppedImages[index-1] = imgElement.src;
-                    showToast(`Student #${index} Studio Grade!`, false);
-                    setTimeout(hideToast, 2000);
+                    const newSrc = `data:image/png;base64,${polishedBase64}`;
+                    imgElement.src = newSrc;
+                    croppedImages[index-1] = newSrc; // Update array for ZIP
+                    showToast(`Student #${index} Updated!`, false);
                 }
             } catch (err) {
-                showToast("Enhancement Error.", false);
-                setTimeout(hideToast, 3000);
+                 if (!err.message.includes('429')) showToast("Enhancement failed.", false);
             } finally {
                 loader.classList.replace('flex', 'hidden');
+                setTimeout(hideToast, 2000);
             }
         };
 
+        // --- UI HELPERS ---
+        function createPhotoCard(src, index) {
+            const div = document.createElement('div');
+            div.className = "photo-card bg-white p-3 rounded-2xl flex flex-col group relative overflow-hidden";
+            div.innerHTML = `
+                <div class="relative aspect-[4/6] overflow-hidden rounded-xl bg-slate-100 mb-3 border border-slate-100">
+                    <img id="img-${index}" src="${src}" class="w-full h-full object-cover" alt="Student ${index}">
+                    <div id="loader-${index}" class="absolute inset-0 bg-white/80 hidden items-center justify-center backdrop-blur-sm z-10">
+                        <div class="loading-spinner"></div>
+                    </div>
+                </div>
+                <div class="flex items-center justify-between no-print">
+                    <span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">#${index}</span>
+                    <div class="flex gap-1">
+                        <button onclick="polishPhoto(${index})" title="Studio Polish" class="p-1.5 text-indigo-500 hover:bg-indigo-50 rounded-lg transition-colors">
+                            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2L14.5 9H22L16 14L18.5 21L12 17L5.5 21L8 14L2 9H9.5L12 2Z"/></svg>
+                        </button>
+                        <a href="${src}" download="Student_${index}.jpg" title="Download Single" class="p-1.5 text-slate-400 hover:bg-slate-50 hover:text-slate-800 rounded-lg transition-colors">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a2 2 0 002 2h12a2 2 0 002-2v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                        </a>
+                    </div>
+                </div>
+            `;
+            grid.appendChild(div);
+        }
+
+        function showToast(text, loading = true) {
+            aiToastText.innerText = text;
+            aiToast.classList.remove('translate-y-24', 'opacity-0');
+            aiToast.querySelector('.loading-spinner').style.display = loading ? 'block' : 'none';
+        }
+
+        function hideToast() {
+            aiToast.classList.add('translate-y-24', 'opacity-0');
+        }
+
+        // --- ZIP EXPORT ---
         downloadZipBtn.addEventListener('click', async () => {
             if (croppedImages.length === 0) return;
-            downloadZipBtn.innerText = "⏳ Building Class ZIP...";
+            
+            const originalText = downloadZipBtn.innerHTML;
+            downloadZipBtn.innerHTML = `<div class="loading-spinner border-white/20 border-t-white w-4 h-4 mr-2"></div> Compiling...`;
             downloadZipBtn.disabled = true;
 
-            const zip = new JSZip();
-            const folder = zip.folder("Student_Portraits");
-            croppedImages.forEach((dataUrl, i) => {
-                const base64 = dataUrl.split(',')[1];
-                folder.file(`Student_${i+1}.jpg`, base64, {base64: true});
-            });
+            try {
+                const zip = new JSZip();
+                const folder = zip.folder("Class_Portraits");
+                
+                croppedImages.forEach((dataUrl, i) => {
+                    const base64 = dataUrl.split(',')[1];
+                    folder.file(`Student_${i+1}.jpg`, base64, {base64: true});
+                });
 
-            const blob = await zip.generateAsync({type: "blob"});
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `Class_Photos_Export_${Date.now()}.zip`;
-            a.click();
-            downloadZipBtn.innerText = "Export Full Class (.zip)";
-            downloadZipBtn.disabled = false;
+                const blob = await zip.generateAsync({type: "blob"});
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `Class_Photos_${new Date().toISOString().slice(0,10)}.zip`;
+                a.click();
+            } catch (e) {
+                showToast("Error creating ZIP", false);
+            } finally {
+                downloadZipBtn.innerHTML = originalText;
+                downloadZipBtn.disabled = false;
+            }
         });
     </script>
 </body>
